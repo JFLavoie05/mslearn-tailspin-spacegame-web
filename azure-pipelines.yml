@@ -1,2 +1,95 @@
-pool:
-  vmImage: 'windows-latest'   # ou 'windows-latest' si tu préfères
+trigger:
+- main
+
+variables:
+  solution: '**/*.sln'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - task: NuGetToolInstaller@1
+      displayName: 'Install NuGet'
+
+    - task: NuGetCommand@2
+      displayName: 'Restore NuGet packages'
+      inputs:
+        restoreSolution: '$(solution)'
+
+    - task: VSBuild@1
+      displayName: 'Build solution'
+      inputs:
+        solution: '$(solution)'
+        msbuildArgs: '/p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:DesktopBuildPackageLocation="$(build.artifactStagingDirectory)\WebApp.zip" /p:DeployIisAppPath="Default Web Site"'
+        platform: '$(buildPlatform)'
+        configuration: '$(buildConfiguration)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact'
+      inputs:
+        PathtoPublish: '$(build.artifactStagingDirectory)'
+        ArtifactName: 'drop'
+
+- stage: Test
+  displayName: 'Test Stage'
+  dependsOn: Build
+  jobs:
+  - job: Test
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - task: NuGetToolInstaller@1
+
+    - task: NuGetCommand@2
+      inputs:
+        restoreSolution: '$(solution)'
+
+    - task: VSTest@2
+      displayName: 'Run Tests'
+      inputs:
+        platform: '$(buildPlatform)'
+        configuration: '$(buildConfiguration)'
+
+- stage: Deploy_Dev
+  displayName: 'Deploy to Development'
+  dependsOn: Test
+  jobs:
+  - deployment: DeployDev
+    displayName: 'Deploy to Dev Environment'
+    pool:
+      vmImage: 'windows-latest'
+    environment: 'development'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: echo "Deploying to Development environment"
+            displayName: 'Simulate Dev Deployment'
+          - download: current
+            artifact: drop
+            displayName: 'Download Build Artifacts'
+
+- stage: Deploy_Staging
+  displayName: 'Deploy to Staging'
+  dependsOn: Deploy_Dev
+  jobs:
+  - deployment: DeployStaging
+    displayName: 'Deploy to Staging Environment'
+    pool:
+      vmImage: 'windows-latest'
+    environment: 'staging'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: echo "Deploying to Staging environment"
+            displayName: 'Simulate Staging Deployment'
+          - download: current
+            artifact: drop
+            displayName: 'Download Build Artifacts'
